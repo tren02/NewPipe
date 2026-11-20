@@ -105,7 +105,8 @@ public abstract class VideoPlayerUi extends PlayerUi implements SeekBar.OnSeekBa
     public static final int SEEK_OVERLAY_DURATION = 450; // 450 millis
 
     // other constants (TODO remove playback speeds and use normal menu for popup, too)
-    private static final float[] PLAYBACK_SPEEDS = {0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f};
+    private static final float[] PLAYBACK_SPEEDS = {0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f,
+            3.5f, 4.0f, 4.5f, 5.0f};
 
     private enum PlayButtonAction {
         PLAY, PAUSE, REPLAY
