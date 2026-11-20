@@ -10,6 +10,9 @@ import android.text.InputType;
 import android.util.Log;
 import android.util.Pair;
 import android.view.LayoutInflater;
+import android.view.Menu;
+import android.view.MenuInflater;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 
@@ -39,6 +42,7 @@ import org.schabi.newpipe.local.holder.LocalBookmarkPlaylistItemHolder;
 import org.schabi.newpipe.local.holder.RemoteBookmarkPlaylistItemHolder;
 import org.schabi.newpipe.local.playlist.LocalPlaylistManager;
 import org.schabi.newpipe.local.playlist.RemotePlaylistManager;
+import org.schabi.newpipe.local.playlist.RemovedVideosDialogs;
 import org.schabi.newpipe.util.NavigationHelper;
 import org.schabi.newpipe.util.OnClickGesture;
 import org.schabi.newpipe.util.debounce.DebounceSavable;
@@ -170,6 +174,26 @@ public final class BookmarkFragment extends BaseLocalListFragment<List<PlaylistL
                 }
             }
         });
+    }
+
+    @Override
+    public void onCreateOptionsMenu(@NonNull final Menu menu,
+                                    @NonNull final MenuInflater inflater) {
+        super.onCreateOptionsMenu(menu, inflater);
+        inflater.inflate(R.menu.menu_bookmarks, menu);
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(@NonNull final MenuItem item) {
+        if (item.getItemId() == R.id.menu_item_find_removed_videos) {
+            if (activity != null && disposables != null) {
+                // save any pending reordering first
+                saveImmediate();
+                RemovedVideosDialogs.startScan(activity, disposables, null);
+            }
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
     }
 
     ///////////////////////////////////////////////////////////////////////////

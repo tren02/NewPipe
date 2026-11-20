@@ -14,6 +14,16 @@
         app:showAsAction="never" />
 
     <item
+        android:id="@+id/menu_item_remove_selected"
+        android:title="@string/select_videos_to_remove"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/menu_item_find_removed_videos"
+        android:title="@string/find_removed_videos_here"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/menu_item_remove_watched"
         android:title="@string/remove_watched"
         app:showAsAction="never" />

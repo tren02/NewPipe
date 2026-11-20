@@ -376,6 +376,10 @@ public class LocalPlaylistFragment extends BaseLocalListFragment<List<PlaylistSt
             createShareConfirmationDialog();
         } else if (item.getItemId() == R.id.menu_item_rename_playlist) {
             createRenameDialog();
+        } else if (item.getItemId() == R.id.menu_item_remove_selected) {
+            openSelectVideosToRemoveDialog();
+        } else if (item.getItemId() == R.id.menu_item_find_removed_videos) {
+            findRemovedVideosInThisPlaylist();
         } else if (item.getItemId() == R.id.menu_item_remove_watched) {
             openRemoveWatchedConfirmationDialog();
         } else if (item.getItemId() == R.id.menu_item_remove_duplicates) {
@@ -565,6 +569,103 @@ public class LocalPlaylistFragment extends BaseLocalListFragment<List<PlaylistSt
 
     private void removeDuplicatesInPlaylist() {
         viewModel.removeDuplicates(playlistId);
+    }
+
+    /**
+     * Shows a list of all the videos in this playlist with a checkbox next to each one. After the
+     * user has ticked the videos to remove, a confirmation dialog is shown.
+     */
+    private void openSelectVideosToRemoveDialog() {
+        if (itemListAdapter == null || getContext() == null) {
+            return;
+        }
+
+        final List<PlaylistStreamEntry> entries = new ArrayList<>();
+        for (final LocalItem item : itemListAdapter.getItemsList()) {
+            if (item instanceof PlaylistStreamEntry entry) {
+                entries.add(entry);
+            }
+        }
+        if (entries.isEmpty()) {
+            return;
+        }
+
+        final String[] titles = new String[entries.size()];
+        for (int i = 0; i < entries.size(); i++) {
+            titles[i] = (i + 1) + ". " + entries.get(i).getStreamEntity().getTitle();
+        }
+        final boolean[] checked = new boolean[entries.size()];
+
+        new AlertDialog.Builder(requireContext())
+                .setTitle(R.string.select_videos_to_remove)
+                .setMultiChoiceItems(titles, checked,
+                        (dialog, which, isChecked) -> checked[which] = isChecked)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.remove_selected, (dialog, which) -> {
+                    final List<PlaylistStreamEntry> selected = new ArrayList<>();
+                    for (int i = 0; i < entries.size(); i++) {
+                        if (checked[i]) {
+                            selected.add(entries.get(i));
+                        }
+                    }
+                    if (selected.isEmpty()) {
+                        Toast.makeText(getContext(), R.string.no_videos_selected,
+                                Toast.LENGTH_SHORT).show();
+                    } else {
+                        openRemoveSelectedConfirmationDialog(selected);
+                    }
+                })
+                .show();
+    }
+
+    private void openRemoveSelectedConfirmationDialog(final List<PlaylistStreamEntry> selected) {
+        if (getContext() == null) {
+            return;
+        }
+
+        new AlertDialog.Builder(requireContext())
+                .setTitle(R.string.remove_selected_videos_title)
+                .setMessage(getString(R.string.remove_selected_videos_message, selected.size()))
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.yes, (dialog, which) -> deleteItems(selected))
+                .show();
+    }
+
+    private void findRemovedVideosInThisPlaylist() {
+        if (playlistId == null || getContext() == null || disposables == null) {
+            return;
+        }
+        if (RemovedVideosChecker.isRemovedVideosPlaylist(name)) {
+            Toast.makeText(getContext(), R.string.removed_videos_this_is_target,
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // make sure any pending changes are saved before the playlist is checked
+        saveImmediate();
+        RemovedVideosDialogs.startScan(requireContext(), disposables, playlistId);
+    }
+
+    private void deleteItems(final List<PlaylistStreamEntry> itemsToDelete) {
+        if (itemListAdapter == null || playlistManager == null || debounceSaver == null) {
+            return;
+        }
+
+        final long thumbnailStreamId = playlistManager.getPlaylistThumbnailStreamId(playlistId);
+        boolean thumbnailRemoved = false;
+        for (final PlaylistStreamEntry item : itemsToDelete) {
+            itemListAdapter.removeItem(item);
+            if (item.getStreamId() == thumbnailStreamId) {
+                thumbnailRemoved = true;
+            }
+        }
+        if (thumbnailRemoved) {
+            updateThumbnailUrl();
+        }
+
+        setStreamCountAndOverallDuration(itemListAdapter.getItemsList());
+        debounceSaver.setHasChangesToSave();
+        saveImmediate();
     }
 
     private void deleteItem(final PlaylistStreamEntry item) {

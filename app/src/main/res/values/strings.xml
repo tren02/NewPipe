@@ -686,6 +686,25 @@
     <string name="remove_duplicates">Remove duplicates</string>
     <string name="remove_duplicates_title">Remove duplicates?</string>
     <string name="remove_duplicates_message">Do you want to remove all duplicate streams in this playlist?</string>
+    <string name="select_videos_to_remove">Select videos to remove</string>
+    <string name="remove_selected">Remove selected</string>
+    <string name="remove_selected_videos_title">Remove videos?</string>
+    <string name="remove_selected_videos_message">Remove %d video(s) from this playlist?</string>
+    <string name="no_videos_selected">No videos selected</string>
+    <string name="find_removed_videos">Find removed videos</string>
+    <string name="find_removed_videos_here">Find removed videos in this playlist</string>
+    <string name="removed_videos_checking_title">Checking for removed videos</string>
+    <string name="removed_videos_collecting">Collecting videos…</string>
+    <string name="removed_videos_progress">Checked %1$d of %2$d videos</string>
+    <string name="removed_videos_none_found">No removed videos found.</string>
+    <string name="removed_videos_found_title">%d removed video(s) found</string>
+    <string name="removed_videos_move">Move to removedvideos</string>
+    <string name="removed_videos_moved">Moved %d video(s) to removedvideos</string>
+    <string name="removed_videos_not_checked">%d video(s) could not be checked (for example because of connection problems) and were left alone.</string>
+    <string name="removed_videos_blocked">YouTube started blocking the checks, so the scan stopped early. Videos that were not checked were left alone. Try again later to check the rest.</string>
+    <string name="removed_videos_review">Review</string>
+    <string name="removed_videos_this_is_target">This is the removedvideos playlist</string>
+    <string name="removed_videos_error">Checking for removed videos failed</string>
     <string name="remove_watched_popup_warning">Streams that have been watched before and after being added to the playlist will be removed.
 \nAre you sure\?</string>
     <string name="remove_watched_popup_partially_watched_streams">Remove partially watched streams</string>
