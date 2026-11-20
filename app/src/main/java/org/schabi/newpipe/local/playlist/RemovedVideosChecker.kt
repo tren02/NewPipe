@@ -7,7 +7,6 @@ package org.schabi.newpipe.local.playlist
 
 import androidx.room3.withWriteTransaction
 import io.reactivex.rxjava3.core.Completable
-import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.schedulers.Schedulers
 import java.io.IOException
 import kotlinx.coroutines.runBlocking
@@ -37,13 +36,10 @@ class RemovedVideosChecker(private val database: AppDatabase) {
     private val playlistTable = database.playlistDAO()
     private val playlistStreamTable = database.playlistStreamDAO()
 
-    sealed class ScanEvent {
-        data class Progress(val checked: Int, val total: Int) : ScanEvent()
-        data class Finished(val result: ScanResult) : ScanEvent()
-    }
-
     class RemovedVideo(
-        val stream: StreamEntity,
+        val streamId: Long,
+        val title: String,
+        val uploader: String,
         val playlistNames: List<String>
     )
 
@@ -57,108 +53,105 @@ class RemovedVideosChecker(private val database: AppDatabase) {
     private enum class Status { EXISTS, REMOVED, UNKNOWN, NETWORK_ERROR, BLOCKED }
 
     /**
-     * Checks every video in the local playlists, one at a time.
+     * Checks every video in the local playlists, one at a time. This blocks, so it must not be
+     * called on the main thread.
      *
      * @param onlyPlaylistId if not null, only this playlist is checked; otherwise all local
      * playlists except [REMOVED_VIDEOS_PLAYLIST_NAME] are checked
+     * @param isCancelled called before each check; the scan stops and returns `null` once it
+     * returns true
+     * @param onProgress called with the number of checked videos and the total
      */
-    fun scan(onlyPlaylistId: Long?): Observable<ScanEvent> {
-        return Observable.create<ScanEvent> { emitter ->
-            try {
-                val playlists = playlistTable.getAll().blockingFirst()
-                    .filter { onlyPlaylistId == null || it.uid == onlyPlaylistId }
-                    .filter { !isRemovedVideosPlaylist(it.name) }
+    fun scan(
+        onlyPlaylistId: Long?,
+        isCancelled: () -> Boolean,
+        onProgress: (checked: Int, total: Int) -> Unit
+    ): ScanResult? {
+        val playlists = playlistTable.getAll().blockingFirst()
+            .filter { onlyPlaylistId == null || it.uid == onlyPlaylistId }
+            .filter { !isRemovedVideosPlaylist(it.name) }
 
-                // each video is checked only once, even if it is in several playlists
-                val streams = LinkedHashMap<Long, StreamEntity>()
-                val playlistNames = HashMap<Long, MutableList<String>>()
-                for (playlist in playlists) {
-                    val entries = playlistStreamTable.getOrderedStreamsOf(playlist.uid)
-                        .blockingFirst()
-                    for (entry in entries) {
-                        streams.putIfAbsent(entry.streamId, entry.streamEntity)
-                        val names = playlistNames.getOrPut(entry.streamId) { mutableListOf() }
-                        val name = playlist.name.orEmpty()
-                        if (!names.contains(name)) {
-                            names.add(name)
-                        }
-                    }
+        // each video is checked only once, even if it is in several playlists
+        val streams = LinkedHashMap<Long, StreamEntity>()
+        val playlistNames = HashMap<Long, MutableList<String>>()
+        for (playlist in playlists) {
+            val entries = playlistStreamTable.getOrderedStreamsOf(playlist.uid).blockingFirst()
+            for (entry in entries) {
+                streams.putIfAbsent(entry.streamId, entry.streamEntity)
+                val names = playlistNames.getOrPut(entry.streamId) { mutableListOf() }
+                val name = playlist.name.orEmpty()
+                if (!names.contains(name)) {
+                    names.add(name)
                 }
+            }
+        }
 
-                val total = streams.size
-                emitter.onNext(ScanEvent.Progress(0, total))
+        val total = streams.size
+        onProgress(0, total)
 
-                val removed = ArrayList<RemovedVideo>()
-                var processed = 0
-                var notChecked = 0
-                var consecutiveNetworkErrors = 0
-                var blocked = false
+        val removed = ArrayList<RemovedVideo>()
+        var processed = 0
+        var notChecked = 0
+        var consecutiveNetworkErrors = 0
+        var blocked = false
 
-                for ((streamId, stream) in streams) {
-                    if (emitter.isDisposed) {
-                        return@create
-                    }
+        for ((streamId, stream) in streams) {
+            if (isCancelled()) {
+                return null
+            }
 
-                    val status = checkStream(stream)
-                    processed++
-                    when (status) {
-                        Status.EXISTS -> consecutiveNetworkErrors = 0
+            val status = checkStream(stream)
+            processed++
+            when (status) {
+                Status.EXISTS -> consecutiveNetworkErrors = 0
 
-                        Status.REMOVED -> {
-                            consecutiveNetworkErrors = 0
-                            removed.add(RemovedVideo(stream, playlistNames[streamId].orEmpty()))
-                        }
-
-                        Status.UNKNOWN -> {
-                            consecutiveNetworkErrors = 0
-                            notChecked++
-                        }
-
-                        Status.NETWORK_ERROR -> {
-                            consecutiveNetworkErrors++
-                            notChecked++
-                        }
-
-                        Status.BLOCKED -> {
-                            blocked = true
-                            notChecked++
-                        }
-                    }
-                    emitter.onNext(ScanEvent.Progress(processed, total))
-
-                    if (blocked || consecutiveNetworkErrors >= MAX_CONSECUTIVE_NETWORK_ERRORS) {
-                        break
-                    }
-
-                    try {
-                        Thread.sleep(DELAY_BETWEEN_CHECKS_MILLIS)
-                    } catch (e: InterruptedException) {
-                        return@create
-                    }
-                }
-
-                if (emitter.isDisposed) {
-                    return@create
-                }
-
-                // videos never reached because the scan stopped early were not checked either
-                val notCheckedTotal = notChecked + (total - processed)
-
-                emitter.onNext(
-                    ScanEvent.Finished(
-                        ScanResult(
-                            removedVideos = removed,
-                            scannedPlaylistIds = playlists.map { it.uid },
-                            notCheckedCount = notCheckedTotal,
-                            stoppedBecauseBlocked = blocked
+                Status.REMOVED -> {
+                    consecutiveNetworkErrors = 0
+                    removed.add(
+                        RemovedVideo(
+                            streamId = streamId,
+                            title = stream.title,
+                            uploader = stream.uploader,
+                            playlistNames = playlistNames[streamId].orEmpty()
                         )
                     )
-                )
-                emitter.onComplete()
-            } catch (e: Throwable) {
-                emitter.tryOnError(e)
+                }
+
+                Status.UNKNOWN -> {
+                    consecutiveNetworkErrors = 0
+                    notChecked++
+                }
+
+                Status.NETWORK_ERROR -> {
+                    consecutiveNetworkErrors++
+                    notChecked++
+                }
+
+                Status.BLOCKED -> {
+                    blocked = true
+                    notChecked++
+                }
             }
-        }.subscribeOn(Schedulers.io())
+            onProgress(processed, total)
+
+            if (blocked || consecutiveNetworkErrors >= MAX_CONSECUTIVE_NETWORK_ERRORS) {
+                break
+            }
+
+            try {
+                Thread.sleep(DELAY_BETWEEN_CHECKS_MILLIS)
+            } catch (e: InterruptedException) {
+                return null
+            }
+        }
+
+        return ScanResult(
+            removedVideos = removed,
+            scannedPlaylistIds = playlists.map { it.uid },
+            // videos never reached because the scan stopped early were not checked either
+            notCheckedCount = notChecked + (total - processed),
+            stoppedBecauseBlocked = blocked
+        )
     }
 
     private fun checkStream(stream: StreamEntity): Status {

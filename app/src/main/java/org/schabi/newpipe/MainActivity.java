@@ -77,6 +77,8 @@ import org.schabi.newpipe.fragments.detail.VideoDetailFragment;
 import org.schabi.newpipe.fragments.list.comments.CommentRepliesFragment;
 import org.schabi.newpipe.fragments.list.search.SearchFragment;
 import org.schabi.newpipe.local.feed.notifications.NotificationWorker;
+import org.schabi.newpipe.local.playlist.RemovedVideosDialogs;
+import org.schabi.newpipe.local.playlist.RemovedVideosWorker;
 import org.schabi.newpipe.player.Player;
 import org.schabi.newpipe.player.event.OnKeyDownListener;
 import org.schabi.newpipe.player.helper.PlayerHolder;
@@ -208,6 +210,12 @@ public class MainActivity extends AppCompatActivity {
         }
 
         MigrationManager.showUserInfoIfPresent(this);
+
+        // opened by tapping the "removed videos found" notification
+        if (savedInstanceState == null && getIntent() != null
+                && RemovedVideosWorker.ACTION_SHOW_RESULT.equals(getIntent().getAction())) {
+            RemovedVideosDialogs.showPendingResult(this);
+        }
     }
 
     @Override
@@ -577,6 +585,13 @@ public class MainActivity extends AppCompatActivity {
 
         super.onNewIntent(intent);
         setIntent(intent);
+        if (intent != null
+                && RemovedVideosWorker.ACTION_SHOW_RESULT.equals(intent.getAction())) {
+            // opened by tapping the "removed videos found" notification: stay on the current
+            // screen and just show the result
+            RemovedVideosDialogs.showPendingResult(this);
+            return;
+        }
         handleIntent(intent);
     }
 

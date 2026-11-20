@@ -632,7 +632,7 @@ public class LocalPlaylistFragment extends BaseLocalListFragment<List<PlaylistSt
     }
 
     private void findRemovedVideosInThisPlaylist() {
-        if (playlistId == null || getContext() == null || disposables == null) {
+        if (playlistId == null || getActivity() == null) {
             return;
         }
         if (RemovedVideosChecker.isRemovedVideosPlaylist(name)) {
@@ -643,7 +643,7 @@ public class LocalPlaylistFragment extends BaseLocalListFragment<List<PlaylistSt
 
         // make sure any pending changes are saved before the playlist is checked
         saveImmediate();
-        RemovedVideosDialogs.startScan(requireContext(), disposables, playlistId);
+        RemovedVideosDialogs.startScan(requireActivity(), playlistId);
     }
 
     private void deleteItems(final List<PlaylistStreamEntry> itemsToDelete) {

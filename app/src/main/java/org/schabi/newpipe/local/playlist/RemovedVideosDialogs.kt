@@ -5,103 +5,90 @@
 
 package org.schabi.newpipe.local.playlist
 
+import android.app.Activity
 import android.content.Context
 import android.util.Log
-import android.view.WindowManager
-import android.widget.LinearLayout
-import android.widget.ProgressBar
-import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
-import io.reactivex.rxjava3.disposables.CompositeDisposable
-import io.reactivex.rxjava3.disposables.Disposable
 import org.schabi.newpipe.NewPipeDatabase
 import org.schabi.newpipe.R
-import org.schabi.newpipe.util.DeviceUtils
+import org.schabi.newpipe.util.PermissionHelper
 
 /**
- * The dialogs of the "Find removed videos" feature: a progress dialog while checking, then a
- * checklist of the removed videos that were found, which can then be moved into the
- * `removedvideos` playlist.
+ * The dialogs of the "Find removed videos" feature. The check itself runs in the background
+ * in [RemovedVideosWorker]; its result is reviewed here and the chosen videos are moved into
+ * the `removedvideos` playlist.
  */
 object RemovedVideosDialogs {
     private const val TAG = "RemovedVideosDialogs"
-    private const val DIALOG_PADDING_DP = 20
 
     /**
-     * Starts checking for removed videos.
+     * Starts checking for removed videos in the background, unless a check is already running.
+     * If the last check found removed videos that haven't been reviewed yet, the user is asked
+     * whether to review them or to start a new check.
      *
-     * @param context the context to show the dialogs in
-     * @param disposables disposables of the calling screen, so that the check is cancelled when
-     * the screen is closed
+     * @param activity the activity to show dialogs in
      * @param onlyPlaylistId the playlist to check, or `null` to check all local playlists
      */
     @JvmStatic
-    fun startScan(context: Context, disposables: CompositeDisposable, onlyPlaylistId: Long?) {
-        val checker = RemovedVideosChecker(NewPipeDatabase.getInstance(context))
+    fun startScan(activity: Activity, onlyPlaylistId: Long?) {
+        if (RemovedVideosWorker.isRunning(activity)) {
+            Toast.makeText(activity, R.string.removed_videos_already_running, Toast.LENGTH_LONG)
+                .show()
+            return
+        }
 
-        val padding = DeviceUtils.dpToPx(DIALOG_PADDING_DP, context)
-        val progressText = TextView(context)
-        progressText.setText(R.string.removed_videos_collecting)
-        val progressBar = ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal)
-        progressBar.isIndeterminate = true
-        val layout = LinearLayout(context)
-        layout.orientation = LinearLayout.VERTICAL
-        layout.setPadding(padding, padding, padding, 0)
-        layout.addView(progressText)
-        layout.addView(progressBar)
-
-        var scanDisposable: Disposable? = null
-        val progressDialog = AlertDialog.Builder(context)
-            .setTitle(R.string.removed_videos_checking_title)
-            .setView(layout)
-            .setCancelable(false)
-            .setNegativeButton(R.string.cancel) { _, _ -> scanDisposable?.dispose() }
-            .show()
-        // checking may take a while, so don't let the screen turn off in the meantime
-        progressDialog.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
-        val disposable = checker.scan(onlyPlaylistId)
-            .observeOn(AndroidSchedulers.mainThread())
-            .subscribe(
-                { event ->
-                    when (event) {
-                        is RemovedVideosChecker.ScanEvent.Progress -> {
-                            progressBar.isIndeterminate = false
-                            progressBar.max = event.total
-                            progressBar.progress = event.checked
-                            progressText.text = context.getString(
-                                R.string.removed_videos_progress,
-                                event.checked,
-                                event.total
-                            )
-                        }
-
-                        is RemovedVideosChecker.ScanEvent.Finished -> {
-                            dismissSafely(progressDialog)
-                            showResult(context, disposables, checker, event.result)
-                        }
-                    }
-                },
-                { throwable ->
-                    Log.e(TAG, "Checking for removed videos failed", throwable)
-                    dismissSafely(progressDialog)
-                    Toast.makeText(context, R.string.removed_videos_error, Toast.LENGTH_LONG)
-                        .show()
+        val pending = RemovedVideosWorker.loadResult(activity)
+        if (pending != null && pending.removedVideos.isNotEmpty()) {
+            AlertDialog.Builder(activity)
+                .setTitle(R.string.find_removed_videos)
+                .setMessage(
+                    activity.getString(
+                        R.string.removed_videos_unreviewed,
+                        pending.removedVideos.size
+                    )
+                )
+                .setPositiveButton(R.string.removed_videos_review) { _, _ ->
+                    showResult(activity, pending)
                 }
-            )
-        scanDisposable = disposable
-        disposables.add(disposable)
-        disposables.add(Disposable.fromAction { dismissSafely(progressDialog) })
+                .setNeutralButton(R.string.removed_videos_new_check) { _, _ ->
+                    RemovedVideosWorker.clearResult(activity)
+                    enqueue(activity, onlyPlaylistId)
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+        } else {
+            enqueue(activity, onlyPlaylistId)
+        }
     }
 
-    private fun showResult(
-        context: Context,
-        disposables: CompositeDisposable,
-        checker: RemovedVideosChecker,
-        result: RemovedVideosChecker.ScanResult
-    ) {
+    private fun enqueue(activity: Activity, onlyPlaylistId: Long?) {
+        // the progress is shown in a notification, so ask for permission to show it
+        PermissionHelper.checkPostNotificationsPermission(
+            activity,
+            PermissionHelper.POST_NOTIFICATIONS_REQUEST_CODE
+        )
+        RemovedVideosWorker.start(activity, onlyPlaylistId)
+        Toast.makeText(activity, R.string.removed_videos_started, Toast.LENGTH_LONG).show()
+    }
+
+    /**
+     * Shows the result of the last check, if there is one that hasn't been reviewed yet.
+     * Called when the user taps the "removed videos found" notification.
+     */
+    @JvmStatic
+    fun showPendingResult(context: Context) {
+        val result = RemovedVideosWorker.loadResult(context)
+        if (result == null || result.removedVideos.isEmpty()) {
+            Toast.makeText(context, R.string.removed_videos_nothing_to_review, Toast.LENGTH_SHORT)
+                .show()
+            return
+        }
+        showResult(context, result)
+    }
+
+    private fun showResult(context: Context, result: RemovedVideosChecker.ScanResult) {
         val notes = ArrayList<String>()
         if (result.stoppedBecauseBlocked) {
             notes.add(context.getString(R.string.removed_videos_blocked))
@@ -112,14 +99,7 @@ object RemovedVideosDialogs {
             )
         }
 
-        if (result.removedVideos.isEmpty()) {
-            notes.add(0, context.getString(R.string.removed_videos_none_found))
-            AlertDialog.Builder(context)
-                .setTitle(R.string.find_removed_videos)
-                .setMessage(notes.joinToString("\n\n"))
-                .setPositiveButton(R.string.ok, null)
-                .show()
-        } else if (notes.isNotEmpty()) {
+        if (notes.isNotEmpty()) {
             AlertDialog.Builder(context)
                 .setTitle(
                     context.getString(
@@ -128,28 +108,23 @@ object RemovedVideosDialogs {
                     )
                 )
                 .setMessage(notes.joinToString("\n\n"))
-                .setNegativeButton(R.string.cancel, null)
+                .setNegativeButton(R.string.removed_videos_later, null)
                 .setPositiveButton(R.string.removed_videos_review) { _, _ ->
-                    showReviewDialog(context, disposables, checker, result)
+                    showReviewDialog(context, result)
                 }
                 .show()
         } else {
-            showReviewDialog(context, disposables, checker, result)
+            showReviewDialog(context, result)
         }
     }
 
-    private fun showReviewDialog(
-        context: Context,
-        disposables: CompositeDisposable,
-        checker: RemovedVideosChecker,
-        result: RemovedVideosChecker.ScanResult
-    ) {
+    private fun showReviewDialog(context: Context, result: RemovedVideosChecker.ScanResult) {
         val videos = result.removedVideos
         val labels = videos.map { video ->
-            val details = listOf(video.stream.uploader, video.playlistNames.joinToString(", "))
+            val details = listOf(video.uploader, video.playlistNames.joinToString(", "))
                 .filter { it.isNotBlank() }
                 .joinToString(" · ")
-            if (details.isEmpty()) video.stream.title else video.stream.title + "\n" + details
+            if (details.isEmpty()) video.title else video.title + "\n" + details
         }.toTypedArray()
         val checked = BooleanArray(videos.size) { true }
 
@@ -158,55 +133,44 @@ object RemovedVideosDialogs {
             .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
                 checked[which] = isChecked
             }
-            .setNegativeButton(R.string.cancel, null)
+            .setNegativeButton(R.string.removed_videos_later, null)
+            .setNeutralButton(R.string.removed_videos_discard) { _, _ ->
+                RemovedVideosWorker.clearResult(context)
+            }
             .setPositiveButton(R.string.removed_videos_move) { _, _ ->
                 val streamIds = videos.indices
                     .filter { checked[it] }
-                    .map { videos[it].stream.uid }
+                    .map { videos[it].streamId }
                 if (streamIds.isEmpty()) {
                     Toast.makeText(context, R.string.no_videos_selected, Toast.LENGTH_SHORT)
                         .show()
                 } else {
-                    move(context, disposables, checker, streamIds, result.scannedPlaylistIds)
+                    move(context, streamIds, result.scannedPlaylistIds)
                 }
             }
             .show()
     }
 
-    private fun move(
-        context: Context,
-        disposables: CompositeDisposable,
-        checker: RemovedVideosChecker,
-        streamIds: List<Long>,
-        sourcePlaylistIds: List<Long>
-    ) {
-        disposables.add(
-            checker.moveToRemovedVideosPlaylist(streamIds, sourcePlaylistIds)
-                .observeOn(AndroidSchedulers.mainThread())
-                .subscribe(
-                    {
-                        Toast.makeText(
-                            context,
-                            context.getString(R.string.removed_videos_moved, streamIds.size),
-                            Toast.LENGTH_LONG
-                        ).show()
-                    },
-                    { throwable ->
-                        Log.e(TAG, "Moving removed videos failed", throwable)
-                        Toast.makeText(context, R.string.removed_videos_error, Toast.LENGTH_LONG)
-                            .show()
-                    }
-                )
-        )
-    }
-
-    private fun dismissSafely(dialog: AlertDialog) {
-        try {
-            if (dialog.isShowing) {
-                dialog.dismiss()
-            }
-        } catch (e: IllegalArgumentException) {
-            // the screen the dialog belonged to is already gone
-        }
+    private fun move(context: Context, streamIds: List<Long>, sourcePlaylistIds: List<Long>) {
+        val appContext = context.applicationContext
+        val checker = RemovedVideosChecker(NewPipeDatabase.getInstance(appContext))
+        // not tied to the screen: moving is quick and should finish even if the screen closes
+        checker.moveToRemovedVideosPlaylist(streamIds, sourcePlaylistIds)
+            .observeOn(AndroidSchedulers.mainThread())
+            .subscribe(
+                {
+                    RemovedVideosWorker.clearResult(appContext)
+                    Toast.makeText(
+                        appContext,
+                        appContext.getString(R.string.removed_videos_moved, streamIds.size),
+                        Toast.LENGTH_LONG
+                    ).show()
+                },
+                { throwable ->
+                    Log.e(TAG, "Moving removed videos failed", throwable)
+                    Toast.makeText(appContext, R.string.removed_videos_error, Toast.LENGTH_LONG)
+                        .show()
+                }
+            )
     }
 }

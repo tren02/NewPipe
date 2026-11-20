@@ -186,10 +186,10 @@ public final class BookmarkFragment extends BaseLocalListFragment<List<PlaylistL
     @Override
     public boolean onOptionsItemSelected(@NonNull final MenuItem item) {
         if (item.getItemId() == R.id.menu_item_find_removed_videos) {
-            if (activity != null && disposables != null) {
+            if (activity != null) {
                 // save any pending reordering first
                 saveImmediate();
-                RemovedVideosDialogs.startScan(activity, disposables, null);
+                RemovedVideosDialogs.startScan(activity, null);
             }
             return true;
         }
